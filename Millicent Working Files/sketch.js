@@ -164,3 +164,4 @@ function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   start();
 }
+//Here is a test modification made on github 'edit in place'to see if it will synchronise to vs code'
