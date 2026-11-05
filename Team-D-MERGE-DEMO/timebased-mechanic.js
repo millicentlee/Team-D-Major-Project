@@ -207,7 +207,9 @@ class TimeController {
        if (b.isDone()) {
          const parts = b.exportParticles();
          for (let j = 0; j < parts.length; j++) finished.push(parts[j]);
-         this.batches.splice(i, 1);
+         this.batches.splice(i, 1); //The functions ouside the class:
+                                    //array.splice(startIndex, deleteCount) 
+                                    //Built-in array method: remove deleteCount elements starting at startIndex;
        }
      }
      return finished;
