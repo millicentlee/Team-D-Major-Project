@@ -32,7 +32,8 @@ class TimeController {
   // multiplied by its thickness, summed, then converted to a particle count
   particleAmountFor(strokes) {
     let ink = 0;
-    for (const s of strokes) {
+    for (let i = 0; i < strokes.length; i++) {
+      const s = strokes[i];
       let length = 0;
       for (let i = 1; i < s.pts.length; i++) {
         length += dist(s.pts[i - 1].x, s.pts[i - 1].y,

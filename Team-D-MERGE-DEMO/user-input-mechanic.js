@@ -9,8 +9,6 @@ class DrawController {
     this.tool = "pencil";    // current tool: pencil, pen or marker
     this.hue = 180;          // current colour (HSB hue)
     this.lastErase = null;   // last erase position, used to erase continuously
-    this.pointCount = 0;     // number of points on the canvas, kept for the HUD
-    this.grab = null;        // the stroke being dragged by the hand tool
   }
 
   // called when the left mouse button is pressed
@@ -41,7 +39,6 @@ class DrawController {
       }
       pts.push({ x: px, y: py });
     }
-    this.pointCount += n;
   }
 
   // called when the mouse is released: save the current stroke
@@ -61,66 +58,8 @@ class DrawController {
       return;
     }
     if (this.strokes.length > 0) {
-      const s = this.strokes.pop();
-      // pointCount counts interpolated points, which is pts.length minus the first
-      this.pointCount = Math.max(0, this.pointCount - (s.pts.length - 1));
+      this.strokes.pop();
     }
-  }
-
-  // hand tool: pick the topmost stroke close to the press position
-  grabStroke(x, y) {
-    for (let i = this.strokes.length - 1; i >= 0; i--) {
-      const s = this.strokes[i];
-      for (const p of s.pts) {
-        if (dist(p.x, p.y, x, y) < 25) {
-          this.grab = { stroke: s, lastX: x, lastY: y };
-          if (tapSound) tapSound.play();
-          return;
-        }
-      }
-    }
-  }
-
-  // hand tool: move every point of the grabbed stroke.
-  // the glass shape blocks the stroke
-  grabDrag(x, y) {
-    if (!this.grab) return;
-    let dx = x - this.grab.lastX;
-    let dy = y - this.grab.lastY;
-    // walk every point's full trajectory in small steps and stop the whole
-    // stroke at the first step that would hit the glass, so a grabbed stroke
-    // can never be dragged through the glass
-    let t = 1;
-    const pts = this.grab.stroke.pts;
-    // high-res image-domain scan of every point's trajectory; the segment
-    // midpoints are tested too so no gap can slip through a glass line
-    for (const p of pts) {
-      const h = firstGlassHit(p.x, p.y, p.x + dx, p.y + dy);
-      if (h === 0) { t = 0; break; } // a point is sitting on the glass: frozen
-      if (h > 0 && h < t) t = h;
-    }
-    if (t > 0) {
-      for (let i = 0; i < pts.length - 1; i++) {
-        const mx2 = (pts[i].x + pts[i + 1].x) / 2;
-        const my2 = (pts[i].y + pts[i + 1].y) / 2;
-        const h = firstGlassHit(mx2, my2, mx2 + dx, my2 + dy);
-        if (h === 0) { t = 0; break; }
-        if (h > 0 && h < t) t = h;
-      }
-    }
-    dx *= t;
-    dy *= t;
-    for (const p of this.grab.stroke.pts) {
-      p.x += dx;
-      p.y += dy;
-    }
-    this.grab.lastX = x;
-    this.grab.lastY = y;
-  }
-
-  // hand tool: release the grabbed stroke
-  grabRelease() {
-    this.grab = null;
   }
 
   // switches tool by name ("pencil", "pen" or "marker"), used by the toolbar icons
@@ -167,33 +106,23 @@ class DrawController {
 
   // removes points whose distance from (x, y) is smaller than the radius
   eraseRadius(x, y) {
-    for (const s of this.strokes) {
-      const before = s.pts.length;
+    for (let i = 0; i < this.strokes.length; i++) {
+      const s = this.strokes[i];
       // keep only points farther than the erase radius
       const kept = [];
-      for (const p of s.pts) {
+      for (let i = 0; i < s.pts.length; i++) {
+        const p = s.pts[i];
         if (dist(x, y, p.x, p.y) > 40) kept.push(p);
       }
       s.pts = kept;
-      this.pointCount -= before - s.pts.length;
     }
     // drop strokes that no longer have any points
     const keptStrokes = [];
-    for (const s of this.strokes) {
+    for (let i = 0; i < this.strokes.length; i++) {
+      const s = this.strokes[i];
       if (s.pts.length > 0) keptStrokes.push(s);
     }
     this.strokes = keptStrokes;
-  }
-
-  // output for Yufei's mechanic: every point with colour and brush size
-  exportInputPoints() {
-    const pts = [];
-    for (const s of this.strokes) {
-      for (const p of s.pts) {
-        pts.push({ x: p.x, y: p.y, colour: s.hue, brushSize: s.size, tool: s.tool });
-      }
-    }
-    return pts;
   }
 
   // output for Yufei's mechanic: strokes kept grouped so the lines can be
@@ -201,27 +130,24 @@ class DrawController {
   exportStrokes(list) {
     const src = list || this.strokes;
     const result = [];
-    for (const s of src) {
+    for (let i = 0; i < src.length; i++) {
+      const s = src[i];
       const pts = [];
-      for (const p of s.pts) pts.push({ x: p.x, y: p.y });
+      for (let i = 0; i < s.pts.length; i++) {
+        const p = s.pts[i];
+        pts.push({ x: p.x, y: p.y });
+      }
       result.push({ pts: pts, hue: s.hue, size: s.size, tool: s.tool });
     }
     return result;
   }
 
-  // output for Milli's mechanic: is the user dragging right now, and where
-  getDragState() {
-    const last = this.current ? this.current.pts[this.current.pts.length - 1] : null;
-    return {
-      isDragging: this.current !== null,
-      x: last ? last.x : 0,
-      y: last ? last.y : 0
-    };
-  }
-
   // draw everything, called from sketch.js every frame
   render() {
-    for (const s of this.strokes) this.drawStroke(s, 1);
+    for (let i = 0; i < this.strokes.length; i++) {
+      const s = this.strokes[i];
+      this.drawStroke(s, 1);
+    }
     if (this.current) this.drawStroke(this.current, 0.6);
     this.drawHover();
     this.drawUI();
@@ -251,7 +177,8 @@ class DrawController {
     }
     noStroke();
     fill(s.hue, 80, 90, fade * 100 * b.alpha);
-    for (const p of s.pts) {
+    for (let i = 0; i < s.pts.length; i++) {
+      const p = s.pts[i];
       if (b.cap === "square") {
         // [OUT OF SCOPE] rectMode(CENTER) draws rects from their centre.
         rectMode(CENTER);
@@ -292,7 +219,7 @@ class DrawController {
     pop();
   }
 
-  // HUD: current colour, tool name, hue value and point count
+  // HUD: current colour, tool name and hue value
   drawUI() {
     push();
     fill(this.hue, 80, 90);

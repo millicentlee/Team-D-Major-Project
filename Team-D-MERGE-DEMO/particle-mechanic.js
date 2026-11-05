@@ -60,23 +60,10 @@ class ParticleController {
     }
   }
 
-  // enter the sandbox with particles from the dissolve mechanic
-  init(particles) {
-    this.particles = [];
-    this.grabbed = [];
-    // build the inside mask once from the collision image
-    if (!this.maskReady) {
-      this.buildInsideMask();
-      this.maskReady = true;
-    }
-    for (const p of particles) {
-      this.particles.push(new Particle(p.x, p.y, p.hue));
-    }
-  }
-
   // add more particles from a later dissolve to the existing ones
   addParticles(particles) {
-    for (const p of particles) {
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
       this.particles.push(new Particle(p.x, p.y, p.hue, p.vx, p.vy));
     }
   }
@@ -161,7 +148,8 @@ class ParticleController {
 
   // push particles away from the mouse
   disturb(mx, my) {
-    for (const p of this.particles) {
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
       const d = dist(mx, my, p.x, p.y);
       if (d < DISTURB_RADIUS && d > 0.1) {
         const force = (1 - d / DISTURB_RADIUS) * DISTURB_FORCE;
@@ -175,7 +163,8 @@ class ParticleController {
   // hand tool: grab every particle in the range around the press point
   grabStart(x, y) {
     this.grabbed = [];
-    for (const p of this.particles) {
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
       if (dist(x, y, p.x, p.y) < GRAB_RADIUS) {
         // offset keeps each particle's place relative to the grab point
         this.grabbed.push({ particle: p, offX: p.x - x, offY: p.y - y });
@@ -186,7 +175,8 @@ class ParticleController {
 
   // hand tool: move the grabbed group, keeping their relative offsets
   grabDrag(x, y) {
-    for (const g of this.grabbed) {
+    for (let i = 0; i < this.grabbed.length; i++) {
+      const g = this.grabbed[i];
       const nx = x + g.offX;
       const ny = y + g.offY;
       // carry the motion as velocity so it continues after release
@@ -207,7 +197,8 @@ class ParticleController {
     // a line and grabbing are not interrupted by disturbance
     if (!mouseIsPressed) this.disturb(mouseX, mouseY);
     // apply forces and move each particle
-    for (const p of this.particles) {
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
       if (!this.isGrabbed(p)) p.update();
     }
     // position constraint: hard-resolve overlaps so the liquid keeps its volume
@@ -296,14 +287,18 @@ class ParticleController {
 
   // true if a particle is currently held by the hand tool
   isGrabbed(p) {
-    for (const g of this.grabbed) {
+    for (let i = 0; i < this.grabbed.length; i++) {
+      const g = this.grabbed[i];
       if (g.particle === p) return true;
     }
     return false;
   }
 
   render() {
-    for (const p of this.particles) p.display();
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      p.display();
+    }
   }
 }
 

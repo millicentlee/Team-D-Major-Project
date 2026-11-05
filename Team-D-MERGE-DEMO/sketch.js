@@ -44,7 +44,6 @@ let toolIcons = [];
 // the door screen images: closed bar door and its open version
 let doorImg;
 let doorOpenImg;
-let doorOpen = 0; // 0 = closed, 1 = hovered open
 
 // audio: background music plus UI sound effects
 let bgMusic, clickSound, tapSound, doorOpenSound, doorCloseSound, glassSlideSound, glassLandSound;
@@ -62,7 +61,6 @@ let enterT0 = 0;
 let enterStarted = false;
 let closeSounded = false, slideSounded = false, landSounded = false;
 let slideAnimStarted = false; // glass moves (off-screen) before the sound starts
-let landT = 0;
 let maxIrisR; // largest visible circle radius (screen centre to corners)
 const T_FADE = 300;         // iris close/open duration
 const T_BLACK_FULL = 300;   // iris fully closed right after the click
@@ -148,11 +146,13 @@ function setup() {
   }
   // shrink the glass images to ~1.25x display height (they are drawn near full-screen)
   const glassH = Math.ceil(windowHeight * 1.25);
-  for (const g of [glassBackImg, glassFrontImg, glassCollisionImg, glassWallImg]) {
+  for (let i = 0; i < [glassBackImg, glassFrontImg, glassCollisionImg, glassWallImg].length; i++) {
+    const g = [glassBackImg, glassFrontImg, glassCollisionImg, glassWallImg][i];
     if (g.height > glassH) g.resize(Math.ceil(glassH * g.width / g.height), glassH);
   }
   // shrink the toolbar icons to 2x their on-screen size
-  for (const ic of toolIcons) {
+  for (let i = 0; i < toolIcons.length; i++) {
+    const ic = toolIcons[i];
     if (ic.img.width > 320) ic.img.resize(320, Math.ceil(320 * ic.img.height / ic.img.width));
     if (ic.activeImg.width > 320) ic.activeImg.resize(320, Math.ceil(320 * ic.activeImg.height / ic.activeImg.width));
   }
@@ -233,7 +233,8 @@ function draw() {
 function drawGlows() {
   const s = 4; // downscale factor
   glowLayer.clear(); // [OUT OF SCOPE] clear() empties the off-screen layer
-  for (const g of glows) {
+  for (let i = 0; i < glows.length; i++) {
+    const g = glows[i];
     g.x += g.vx;
     g.y += g.vy;
     if (g.x < 0 || g.x > width)  g.vx *= -1;
@@ -377,36 +378,6 @@ function drawGlassFront() {
   pop();
 }
 
-// returns true if the point (cx, cy) is inside the glass.
-// it maps the canvas point onto the glass wall image, reads the pixel
-// with get(), and checks its alpha channel: pixels with alpha above the
-// threshold are inside the glass, transparent pixels are outside.
-// rim band of the glass-back arc (the cup opening), cached in image coords
-let rimYTop = -1;
-let rimYBottom = -1;
-
-// scans the glass-back image once and returns the vertical band of the rim
-function getRimBand() {
-  if (rimYTop >= 0) return { top: rimYTop, bottom: rimYBottom };
-  if (!glassBackImg) return null;
-  glassBackImg.loadPixels(); // [OUT OF SCOPE] pixels[] then holds the image
-  const px = glassBackImg.pixels;
-  const w = glassBackImg.width;
-  const h = glassBackImg.height;
-  let top = h, bottom = -1;
-  for (let y = 0; y < h; y += 2) {
-    for (let x = 0; x < w; x += 2) {
-      if (px[(y * w + x) * 4 + 3] > 8) {
-        if (y < top) top = y;
-        if (y > bottom) bottom = y;
-      }
-    }
-  }
-  rimYTop = top;
-  rimYBottom = bottom;
-  return { top, bottom };
-}
-
 // ---------------------------------------------------------
 // Submodule: Glass collision detection (prevent drawing inside glass).
 // ---------------------------------------------------------
@@ -523,7 +494,8 @@ function drawDoor() {
 
 // draws the three tool icons: the active tool uses its highlighted image
 function drawToolIcons() {
-  for (const ic of toolIcons) {
+  for (let i = 0; i < toolIcons.length; i++) {
+    const ic = toolIcons[i];
     const img = ic.tool === ctrl.tool ? ic.activeImg : ic.img;
     image(img, ic.x, ic.y, ic.size, ic.size);
   }
@@ -563,7 +535,8 @@ function mousePressed() {
   // sandbox: toolbar, drawing, erasing and particle grabbing
   if (scene === "sandbox") {
     // clicking a toolbar icon switches the tool
-    for (const ic of toolIcons) {
+    for (let i = 0; i < toolIcons.length; i++) {
+      const ic = toolIcons[i];
       if (mouseX > ic.x - 6 && mouseX < ic.x + ic.size + 6 &&
           mouseY > ic.y - 6 && mouseY < ic.y + ic.size + 6) {
         ctrl.switchTool(ic.tool);
