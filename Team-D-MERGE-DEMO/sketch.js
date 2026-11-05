@@ -9,10 +9,8 @@ let ctrl;
 // the other mechanics:
 // timeCtrl fades lines into particles
 // particleCtrl is the sandbox (flow, mouse push, hand drag)
-// attractorCtrl takes particles once they're outside the glass
 let timeCtrl;
 let particleCtrl;
-let attractorCtrl;
 
 // fade slider
 let fadeSlider;
@@ -119,7 +117,6 @@ function setup() {
   ctrl = new DrawController();
   timeCtrl = new TimeController();
   particleCtrl = new ParticleController();
-  attractorCtrl = new AttractorController();
   textFont("Calibri");
   // [OUT OF SCOPE] block the right-click menu so that button can erase
   document.querySelector("canvas").addEventListener("contextmenu", function (e) { e.preventDefault(); });
@@ -134,14 +131,12 @@ function setup() {
       vy: random(-0.3, 0.3)
     });
   }
-  // build the left toolbar with the three tool icons
-  const size = 160;
-  const x = 32;
-  const yTop = 190;
-  toolIcons.push({ img: iconPencil, activeImg: iconPencilActive, tool: "pencil", x, y: yTop, size });
-  toolIcons.push({ img: iconPen, activeImg: iconPenActive, tool: "pen", x, y: yTop + 180, size });
-  toolIcons.push({ img: iconMarker, activeImg: iconMarkerActive, tool: "marker", x, y: yTop + 360, size });
-  toolIcons.push({ img: iconHand, activeImg: iconHandActive, tool: "hand", x, y: yTop + 540, size });
+  // positions come from the window height, so a short window doesn't clip the last icon
+  toolIcons.push({ img: iconPencil, activeImg: iconPencilActive, tool: "pencil", x: 0, y: 0, size: 0 });
+  toolIcons.push({ img: iconPen, activeImg: iconPenActive, tool: "pen", x: 0, y: 0, size: 0 });
+  toolIcons.push({ img: iconMarker, activeImg: iconMarkerActive, tool: "marker", x: 0, y: 0, size: 0 });
+  toolIcons.push({ img: iconHand, activeImg: iconHandActive, tool: "hand", x: 0, y: 0, size: 0 });
+  layoutToolIcons();
   // shrink the door images once so the per-frame draw stays fast
   const doorTargetW = Math.min(720, windowWidth * 0.46);
   if (doorImg.width > doorTargetW) {
@@ -157,11 +152,11 @@ function setup() {
     const g = [glassBackImg, glassFrontImg, glassCollisionImg, glassWallImg][i];
     if (g.height > glassH) g.resize(Math.ceil(glassH * g.width / g.height), glassH);
   }
-  // shrink the toolbar icons to 2x their on-screen size
+  // only shrink huge sources; 512 still looks sharp when a tall window scales the icons up
   for (let i = 0; i < toolIcons.length; i++) {
     const ic = toolIcons[i];
-    if (ic.img.width > 320) ic.img.resize(320, Math.ceil(320 * ic.img.height / ic.img.width));
-    if (ic.activeImg.width > 320) ic.activeImg.resize(320, Math.ceil(320 * ic.activeImg.height / ic.activeImg.width));
+    if (ic.img.width > 512) ic.img.resize(512, Math.ceil(512 * ic.img.height / ic.img.width));
+    if (ic.activeImg.width > 512) ic.activeImg.resize(512, Math.ceil(512 * ic.activeImg.height / ic.activeImg.width));
   }
   // grab the collision pixels once, checking every frame with get() is too slow
   // [OUT OF SCOPE] loadPixels() so we can read the alpha straight from the array
@@ -233,7 +228,7 @@ function draw() {
     drawGlassBack();
     // interactive particles run continuously (gravity, drift, disturbance)
     particleCtrl.update();
-    attractorCtrl.renderTrace();
+    particleCtrl.renderTrace();
     particleCtrl.render();
     // dissolve batches run in the background; finished batches add particles
     const newParticles = timeCtrl.update();
@@ -345,7 +340,7 @@ function updateEnterTimeline() {
           scene = "sandbox";
           // build the particle mask once before the sandbox starts
           particleCtrl.prepare();
-          attractorCtrl.setup();
+          particleCtrl.setupAttractor();
         }
       }
     }
@@ -505,6 +500,23 @@ function drawDoor() {
 // Submodule: Toolbar render.
 // ---------------------------------------------------------
 
+// fit all four icons in the window: short windows shrink them, tall ones scale them up
+function layoutToolIcons() {
+  const topPad = height * 0.10;
+  const botPad = height * 0.06;
+  const avail = height - topPad - botPad;
+  const size = avail / 4.45;
+  const gap = size * 0.15;
+  const x = height * 0.025;
+  for (let i = 0; i < toolIcons.length; i++) {
+    const ic = toolIcons[i];
+    ic.x = x;
+    ic.size = size;
+    if (i === 0) ic.y = topPad;
+    else ic.y = toolIcons[i - 1].y + size + gap;
+  }
+}
+
 // tool icons. the selected one uses the lit image.
 function drawToolIcons() {
   for (let i = 0; i < toolIcons.length; i++) {
@@ -611,7 +623,7 @@ function mousePressed(event) {
         return;
       }
     }
-    if (mouseButton === RIGHT) { ctrl.eraseClick(mouseX, mouseY); return; }
+    if (mouseButton === RIGHT) { ctrl.eraseClick(mouseX, mouseY); particleCtrl.eraseAt(mouseX, mouseY); return; }
     if (ctrl.tool === "hand") particleCtrl.grabStart(mouseX, mouseY);
     else ctrl.startStroke(mouseX, mouseY);
     return;
@@ -621,7 +633,7 @@ function mousePressed(event) {
 function mouseDragged() {
   if (scene === "sandbox") {
     if (pointerOnUI) return;
-    if (mouseButton === RIGHT) { ctrl.eraseDrag(mouseX, mouseY); return; }
+    if (mouseButton === RIGHT) { ctrl.eraseDrag(mouseX, mouseY); particleCtrl.eraseAt(mouseX, mouseY); return; }
     if (ctrl.tool === "hand") particleCtrl.grabDrag(mouseX, mouseY);
     else ctrl.addPoint(mouseX, mouseY);
     return;
@@ -671,5 +683,6 @@ function windowResized() {
   maxIrisR = Math.sqrt((width / 2) * (width / 2) + (height / 2) * (height / 2));
   fadeSlider.position(20, height - 80);
   clearBtn.position(340, height - 107);
-  attractorCtrl.setup();
+  particleCtrl.setupAttractor();
+  layoutToolIcons();
 }
