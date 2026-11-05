@@ -1,4 +1,9 @@
-// sketch.js
+//--------------------------------------------------------
+// Main entry file.
+// Core: Scene state machine, asset loading, input handling, layer rendering.
+// DrawController / TimeController / ParticleController are defined in separate JS files.
+// --------------------------------------------------------
+
 // Global state: one DrawController instance for the whole sketch.
 let ctrl;
 
@@ -64,6 +69,10 @@ const T_BLACK_FULL = 300;   // iris fully closed right after the click
 const T_CLOSE_START = 1100; // open sound (1.1s) done, close sound begins
 const T_OPEN_START = 1850;  // close sound (0.75s) done, iris begins opening
 
+// --------------------------------------------------------
+// Preload: Load image & audio assets.
+// --------------------------------------------------------
+
 function preload() {
   glassBackImg = loadImage("assets/glass-back.png");
   glassFrontImg = loadImage("assets/glass-front.png");
@@ -87,6 +96,10 @@ function preload() {
   glassSlideSound = loadSound("assets/audio/sfx-glass-slide.wav");
   glassLandSound = loadSound("assets/audio/sfx-glass-land.wav");
 }
+
+// --------------------------------------------------------
+// Setup: Create the canvas, initialize controllers, and prepare assets.
+// --------------------------------------------------------
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -150,6 +163,11 @@ function setup() {
   glassWallImg.loadPixels();
 }
 
+// --------------------------------------------------------
+// Main draw loop: run logic by different scene.
+// Scene flow: door page → intro transition → sandbox drawing & particle scene.
+// --------------------------------------------------------
+
 function draw() {
   background(0, 0, 6); // near black base
   drawGlows();
@@ -205,6 +223,10 @@ function draw() {
   }
 }
 
+// --------------------------------------------------------
+// Submodule: Background glow effect.
+// --------------------------------------------------------
+
 // moves the glows, draws them into the small layer and blurs it there:
 // blurring a quarter-size layer every frame is much cheaper than
 // blurring the full canvas
@@ -223,6 +245,10 @@ function drawGlows() {
   // [OUT OF SCOPE] filter(BLUR) blurs the small layer.
   glowLayer.filter(BLUR, 20); // cheap: only 1/16 of the full pixels
 }
+
+// ---------------------------------------------------------
+// Submodule: Entry timeline & iris mask transition.
+// ---------------------------------------------------------
 
 // drives the entry timeline: door close, black fade in/out, slide and
 // landing sounds, and finally flips the scene to the interactive sandbox
@@ -288,6 +314,10 @@ function drawIris(visR) {
   circle(width / 2, height / 2, 2 * (maxIrisR + visR));
   pop();
 }
+
+// ---------------------------------------------------------
+// Submodule: Glass sliding animation.
+// ---------------------------------------------------------
 
 // slides the glass in from the right with easing:
 // each frame it moves part of the remaining distance, so it is fast
@@ -377,6 +407,10 @@ function getRimBand() {
   return { top, bottom };
 }
 
+// ---------------------------------------------------------
+// Submodule: Glass collision detection (prevent drawing inside glass).
+// ---------------------------------------------------------
+
 // glass-wall check given image coordinates
 function glassCollisionMap(mx, my) {
   if (!glassCollisionImg) return false;
@@ -437,6 +471,10 @@ function getDoorRect() {
   return { x: (width - dw) / 2, y: (height - dh) / 2, w: dw, h: dh };
 }
 
+// ---------------------------------------------------------
+// Submodule: Door page render.
+// ---------------------------------------------------------
+
 function drawDoor() {
   const doorRect = getDoorRect();
   const dx = doorRect.x, dy = doorRect.y, dw = doorRect.w, dh = doorRect.h;
@@ -479,6 +517,10 @@ function drawDoor() {
   textAlign(LEFT, BASELINE);
 }
 
+// ---------------------------------------------------------
+// Submodule: Toolbar render.
+// ---------------------------------------------------------
+
 // draws the three tool icons: the active tool uses its highlighted image
 function drawToolIcons() {
   for (const ic of toolIcons) {
@@ -486,6 +528,10 @@ function drawToolIcons() {
     image(img, ic.x, ic.y, ic.size, ic.size);
   }
 }
+
+// ---------------------------------------------------------
+// Input handler: mouse & keyboard, send actions to controllers.
+// ---------------------------------------------------------
 
 function mousePressed() {
   // clicking the door unlocks the audio and opens the sketch
@@ -575,6 +621,10 @@ function keyPressed() {
   if (canDraw && key === "1") ctrl.adjustSize(-1);
   else if (canDraw && key === "2") ctrl.adjustSize(1);
 }
+
+// ---------------------------------------------------------
+// Window resize.
+// ---------------------------------------------------------
 
 // keeps the canvas filling the window on resize
 function windowResized() {
