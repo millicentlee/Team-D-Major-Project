@@ -13,6 +13,10 @@ let ctrl;
 let timeCtrl;
 let particleCtrl;
 
+// fade slider
+let fadeSlider;
+let fadeDurationMs = 4000;
+
 // floating colour glows for the colourful black background
 let glows = [];
 
@@ -161,6 +165,16 @@ function setup() {
   // read the alpha channel directly.
   glassCollisionImg.loadPixels();
   glassWallImg.loadPixels();
+
+  // create the fade duration slider, but hide it until the sandbox scene
+  fadeSlider = createSlider(1000, 8000, fadeDurationMs, 100);
+  fadeSlider.style('width','220px');
+  fadeSlider.position(20, height - 50);
+  fadeSlider.hide();
+  fadeSlider.input(()=>{
+    fadeDurationMs = fadeSlider.value();
+    timeCtrl.dissolveDuration = fadeDurationMs;
+  });
 }
 
 // --------------------------------------------------------
@@ -177,6 +191,7 @@ function draw() {
   if (scene === "door") {
     drawDoor();
     updateEnterTimeline();
+    fadeSlider.hide();
     return;
   }
 
@@ -188,6 +203,7 @@ function draw() {
     drawGlassFront();
     drawToolIcons();
     updateEnterTimeline();
+    fadeSlider.hide();
     return;
   }
 
@@ -207,6 +223,16 @@ function draw() {
     ctrl.render();
     drawGlassFront();
     drawToolIcons();
+
+    // fade duration slider and text
+    fadeSlider.show();
+    fill(255);
+    noStroke();
+    textAlign(LEFT, BOTTOM);
+    textSize(14);
+    text(`Fade Duration: ${fadeDurationMs} ms`, 20, height - 55);
+    textAlign(LEFT, BASELINE);
+
     // each line dissolves 3 seconds after it was released, on its own clock
     const due = [];
     const keep = [];
@@ -604,4 +630,5 @@ function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   glowLayer.resizeCanvas(width / 4, height / 4);
   maxIrisR = Math.sqrt((width / 2) * (width / 2) + (height / 2) * (height / 2));
+  fadeSlider.position(20, height - 50);
 }
