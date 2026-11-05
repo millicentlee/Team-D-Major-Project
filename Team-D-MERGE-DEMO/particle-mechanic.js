@@ -1,19 +1,14 @@
 // particle-mechanic.js
-// ParticleController owns the interactive particle sandbox. After the drawn
-// lines dissolve into particles, the glass stays on screen. Particles inside
-// the glass fall with gravity and flow along the glass, particles outside
-// drift slowly. The mouse pushes particles around and the hand tool drags a
-// group of particles.
+// after a line dissolves, the bits stay in the glass.
+// inside they flow with the curl, outside they drift or sit on the attractor.
+// the mouse pushes them, the hand drags a bunch.
 
 // ----- settings -----
 const GRAVITY = 0.0;       // TEMP: zero gravity to inspect pure curl circulation
 const PARTICLE_DRAG = 0.98; // velocity kept each frame inside the glass
-const CURL_FORCE = 130;    // strength of the curl-noise current inside the glass
+const CURL_FORCE = 60;    // strength of the curl-noise current inside the glass
 const SURFACE_BAND = 70;   // band below the rim where the surface pushes back
 const SURFACE_FORCE = 0.5; // downward push keeping particles inside the rim
-const FLOAT_FORCE = 0.06;   // strength of the slow drift outside the glass
-const FLOAT_DRAG = 0.95;    // velocity kept each frame outside the glass
-const ENTRY_PULL = 0.4;     // downward pull near the open rim
 const DISTURB_RADIUS = 60;  // how far the mouse pushes particles
 const DISTURB_FORCE = 2.5;  // how hard the mouse pushes
 const GRAB_RADIUS = 90;     // range of particles grabbed by the hand tool
@@ -27,19 +22,14 @@ let insideMask;
 // rim (cup opening) position in collision-image coordinates
 let rimInfo;
 
-// [OUT OF SCOPE] curl noise: the curl (rotation) of a Perlin scalar field gives
-// a divergence-free flow, so particles circulate smoothly without bunching on
-// one side. The partial derivatives are approximated by sampling noise on each
-// side of the point and taking the difference
+// [OUT OF SCOPE] curl of a noise field, so the flow swirls instead of clumping
 function curlNoise(x, y, t) {
   const eps = 1.0;
   const n = function (px, py) {
-    return noise(px * 0.004, py * 0.004, t * 0.0025);
+    return noise(px * 0.004, py * 0.004, t * 0.005);
   };
-  // rate of change along x and y (finite difference)
   const ddx = (n(x + eps, y) - n(x - eps, y)) / (2 * eps);
   const ddy = (n(x, y + eps) - n(x, y - eps)) / (2 * eps);
-  // curl in 2D: x velocity from the y derivative, y from the x derivative
   return { x: ddy, y: -ddx };
 }
 
@@ -50,7 +40,7 @@ class ParticleController {
     this.maskReady = false;
   }
 
-  // prepare the sandbox once: empty particles and build the inside mask
+  // prepare once: empty the list and build the inside mask
   prepare() {
     this.particles = [];
     this.grabbed = [];
@@ -58,6 +48,18 @@ class ParticleController {
       this.buildInsideMask();
       this.maskReady = true;
     }
+  }
+
+  // wipe the drawing, including anything sitting in the cup.
+  // a fixed attractor particle only stays if it is still outside.
+  clear() {
+    const kept = [];
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      if (p.fixed && !this.isInside(p.x, p.y)) kept.push(p);
+    }
+    this.particles = kept;
+    this.grabbed = [];
   }
 
   // add more particles from a later dissolve to the existing ones
@@ -74,7 +76,8 @@ class ParticleController {
     const W = img.width;
     const H = img.height;
     const px = img.pixels;
-    // 1 where the collision image is drawn (the glass wall)
+    // 1 on the glass wall pixels
+    // [OUT OF SCOPE] Uint8Array is a byte list for the mask. We didn't use these in class.
     const wall = new Uint8Array(W * H);
     for (let i = 0; i < W * H; i++) {
       if (px[i * 4 + 3] > 8) wall[i] = 1;
@@ -128,22 +131,6 @@ class ParticleController {
     const r = getGlassRect();
     const H = glassCollisionImg.height;
     return r.y + (rimInfo.y / H) * r.h;
-  }
-
-  // true if a canvas point sits on the rim opening band (just above the rim)
-  isAtRim(cx, cy) {
-    const r = getGlassRect();
-    const W = glassCollisionImg.width;
-    const H = glassCollisionImg.height;
-    const rimCanvasY = r.y + (rimInfo.y / H) * r.h;
-    const rimCanvasLeft = r.x + (rimInfo.left / W) * r.w;
-    const rimCanvasRight = r.x + (rimInfo.right / W) * r.w;
-    return (
-      cx > rimCanvasLeft &&
-      cx < rimCanvasRight &&
-      cy > rimCanvasY - 50 &&
-      cy < rimCanvasY
-    );
   }
 
   // push particles away from the mouse
@@ -201,24 +188,17 @@ class ParticleController {
       const p = this.particles[i];
       if (!this.isGrabbed(p)) p.update();
     }
-    // position constraint: hard-resolve overlaps so the liquid keeps its volume
+    // separate them when they overlap, so the liquid keeps its volume
     this.resolveOverlaps();
   }
 
-  // [OUT OF SCOPE] spatial grid: the canvas is split into squares the same
-  // width as the closest spacing allowed. Each inside particle is dropped
-  // into the square it sits in, together with its place in the particle list.
-  // The squares are rebuilt every pass because the particles move. To find
-  // who is close, you open one square and the eight squares that touch it,
-  // instead of comparing every particle with every other. Filling the squares
-  // is one walk over the list, and each particle then only meets the ones
-  // nearby, so the work stays close to one step per particle instead of the
-  // count times itself.
+  // [OUT OF SCOPE] split the canvas into cells so we only check neighbours, not every particle
   buildSpatialGrid() {
     const grid = {};
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
       if (!p.inside) continue;
+      // [OUT OF SCOPE] Math.floor — we didn't cover the Math object in class
       const gx = Math.floor(p.x / MIN_DIST);
       const gy = Math.floor(p.y / MIN_DIST);
       const key = gx + "," + gy;
@@ -228,16 +208,7 @@ class ParticleController {
     return grid;
   }
 
-  // [OUT OF SCOPE] spatial grid lookup: each particle only checks the square
-  // it sits in and the eight squares around it. Two particles closer than the
-  // minimum spacing must be in the same square or a neighbouring one, so no
-  // overlap is missed, and anything farther away needs no correction. Using
-  // the higher list index keeps each pair handled once. The grid is one walk
-  // over the particles, and the checks stay local, so this pass stays close
-  // to one step per particle instead of every particle against every other.
-  // [OUT OF SCOPE] position-based constraint: instead of pushing particles with
-  // a repulsion force, overlapping particles are moved apart directly in space.
-  // This reliably keeps the liquid incompressible so it builds a real volume
+  // [OUT OF SCOPE] we move them apart directly instead of pushing with a force
   resolveOverlaps() {
     for (let iter = 0; iter < CONSTRAINT_ITERS; iter++) {
       const grid = this.buildSpatialGrid();
@@ -264,8 +235,9 @@ class ParticleController {
                 const overlap = MIN_DIST - d;
                 const aFixed = this.isGrabbed(a);
                 const bFixed = this.isGrabbed(b);
-                // split the correction between the particles that are free to move
+                // free ones share the move; a grabbed one stays put
                 if (!aFixed) {
+                  // [OUT OF SCOPE] ? : is a one-line if/else. We didn't use this form in class.
                   const aShare = bFixed ? 1 : 0.5;
                   const nax = a.x - ux * overlap * aShare;
                   const nay = a.y - uy * overlap * aShare;
@@ -321,15 +293,26 @@ class Particle {
     }
     this.vx = ivx;
     this.vy = ivy;
+    // attractor state: drift position, box position, and the blend between them
+    this.driftX = x;
+    this.driftY = y;
+    this.ax = (x - width / 2) / zoom;
+    this.ay = (y - height / 2) / zoom;
+    this.targetX = x;
+    this.targetY = y;
+    this.age = 0;
+    this.handover = 0;
+    this.fixed = false; // set once it is actually following the attractor
+    // born outside: pick a mode here. beginOutside picks again each time it leaves
+    this.mode = random() < 0.5 ? "drift" : "attractor";
   }
 
   update() {
+    const wasInside = this.inside;
     this.inside = particleCtrl.isInside(this.x, this.y);
     if (this.inside) {
       // gravity settles the liquid toward the bottom
       this.vy += GRAVITY;
-      // curl noise drives a smooth, divergence-free current so the liquid
-      // circulates in swirls without bunching on one side
       const curl = curlNoise(this.x, this.y, frameCount);
       this.vx += curl.x * CURL_FORCE;
       this.vy += curl.y * CURL_FORCE;
@@ -342,10 +325,7 @@ class Particle {
       }
       this.vx *= PARTICLE_DRAG;
       this.vy *= PARTICLE_DRAG;
-      // move in small steps so a particle cannot jump over the thin wall.
-      // only a new position that stays inside the glass is accepted; if the
-      // wall blocks it, keep the velocity and let the evolving flow field
-      // point a free direction next frame instead of freezing the particle
+      // small steps, and only keep a step that is still inside the glass
       const total = Math.hypot(this.vx, this.vy);
       const steps = Math.max(1, Math.ceil(total / 2));
       const sx = this.vx / steps;
@@ -359,35 +339,9 @@ class Particle {
         }
       }
     } else {
-      // slow Perlin drift outside the glass
-      const ang = noise(this.x * 0.005, this.y * 0.005, frameCount * 0.003) * TWO_PI * 2;
-      this.vx += cos(ang) * FLOAT_FORCE;
-      this.vy += sin(ang) * FLOAT_FORCE;
-      // at the open rim, ease it downward so it can drop into the glass
-      if (particleCtrl.isAtRim(this.x, this.y)) this.vy += ENTRY_PULL;
-      this.vx *= FLOAT_DRAG;
-      this.vy *= FLOAT_DRAG;
-      // move in small steps and slide along the wall
-      const total = Math.hypot(this.vx, this.vy);
-      const steps = Math.max(1, Math.ceil(total / 2));
-      const sx = this.vx / steps;
-      const sy = this.vy / steps;
-      for (let i = 0; i < steps; i++) {
-        const nx = this.x + sx;
-        const ny = this.y + sy;
-        if (!glassCollision(nx, ny)) {
-          this.x = nx;
-          this.y = ny;
-        } else {
-          if (!glassCollision(nx, this.y)) this.x = nx;
-          if (!glassCollision(this.x, ny)) this.y = ny;
-        }
-      }
-      // outside particles wrap around the screen edges so they stay in view
-      if (this.x < 0) this.x = width;
-      if (this.x > width) this.x = 0;
-      if (this.y < 0) this.y = height;
-      if (this.y > height) this.y = 0;
+      // outside the glass: restart the blend when leaving, then follow the attractor
+      if (wasInside) attractorCtrl.beginOutside(this);
+      attractorCtrl.updateOutside(this);
     }
   }
 

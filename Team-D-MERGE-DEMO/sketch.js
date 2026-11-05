@@ -1,21 +1,24 @@
 //--------------------------------------------------------
-// Main entry file.
-// Core: Scene state machine, asset loading, input handling, layer rendering.
-// DrawController / TimeController / ParticleController are defined in separate JS files.
+// main file: scenes, loading, input, drawing order.
+// the four mechanics live in their own files.
 // --------------------------------------------------------
 
-// Global state: one DrawController instance for the whole sketch.
+// one DrawController for the whole sketch
 let ctrl;
 
-// mechanic controllers for the team merge:
-// timeCtrl fades the drawn lines into particles, particleCtrl owns the
-// interactive particle sandbox (gravity, mouse disturbance, hand drag)
+// the other mechanics:
+// timeCtrl fades lines into particles
+// particleCtrl is the sandbox (flow, mouse push, hand drag)
+// attractorCtrl takes particles once they're outside the glass
 let timeCtrl;
 let particleCtrl;
+let attractorCtrl;
 
 // fade slider
 let fadeSlider;
+let clearBtn;
 let fadeDurationMs = 4000;
+let pointerOnUI = false;
 
 // floating colour glows for the colourful black background
 let glows = [];
@@ -105,20 +108,20 @@ function preload() {
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
-  glassOffsetX = width; // the glass starts fully off-screen to the right
+  glassOffsetX = width; // starts off to the right
+  // [OUT OF SCOPE] Math.sqrt — we didn't cover the Math object in class
   maxIrisR = Math.sqrt((width / 2) * (width / 2) + (height / 2) * (height / 2));
-  glassAngle = -0.35;   // tilted to the left (about -20 degrees) at the start
-  // [OUT OF SCOPE] createGraphics makes a small off-screen canvas. The glows are
-  // drawn and blurred there (cheap), then stretched onto the main canvas.
+  glassAngle = -0.35;   // tilted left at the start, about -20 degrees
+  // [OUT OF SCOPE] createGraphics is a small extra canvas. Blurring that is much cheaper than the full screen.
   glowLayer = createGraphics(width / 4, height / 4);
   glowLayer.colorMode(HSB, 360, 100, 100);
   colorMode(HSB, 360, 100, 100);
   ctrl = new DrawController();
   timeCtrl = new TimeController();
   particleCtrl = new ParticleController();
+  attractorCtrl = new AttractorController();
   textFont("Calibri");
-  // [OUT OF SCOPE] Stop the browser's right-click menu so the right mouse
-  // button can be used to erase.
+  // [OUT OF SCOPE] block the right-click menu so that button can erase
   document.querySelector("canvas").addEventListener("contextmenu", function (e) { e.preventDefault(); });
   // create the background colour glows
   for (let i = 0; i < 16; i++) {
@@ -142,7 +145,7 @@ function setup() {
   // shrink the door images once so the per-frame draw stays fast
   const doorTargetW = Math.min(720, windowWidth * 0.46);
   if (doorImg.width > doorTargetW) {
-    // [OUT OF SCOPE] image.resize() shrinks images once so drawing stays fast.
+    // [OUT OF SCOPE] resize() once now, so we aren't scaling the big image every frame
     doorImg.resize(doorTargetW, doorTargetW * doorImg.height / doorImg.width);
   }
   if (doorOpenImg.width > doorTargetW) {
@@ -160,21 +163,35 @@ function setup() {
     if (ic.img.width > 320) ic.img.resize(320, Math.ceil(320 * ic.img.height / ic.img.width));
     if (ic.activeImg.width > 320) ic.activeImg.resize(320, Math.ceil(320 * ic.activeImg.height / ic.activeImg.width));
   }
-  // cache the collision image pixels once for fast per-frame collision tests
-  // [OUT OF SCOPE] loadPixels() fills the pixels[] array so collision tests can
-  // read the alpha channel directly.
+  // grab the collision pixels once, checking every frame with get() is too slow
+  // [OUT OF SCOPE] loadPixels() so we can read the alpha straight from the array
   glassCollisionImg.loadPixels();
   glassWallImg.loadPixels();
 
   // create the fade duration slider, but hide it until the sandbox scene
   fadeSlider = createSlider(1000, 8000, fadeDurationMs, 100);
-  fadeSlider.style('width','220px');
-  fadeSlider.position(20, height - 50);
+  fadeSlider.id('fadeSlider');
+  fadeSlider.style('width','300px');
+  fadeSlider.position(20, height - 80);
   fadeSlider.hide();
+  // [OUT OF SCOPE] () => is a short function. We didn't write functions this way in class.
   fadeSlider.input(()=>{
     fadeDurationMs = fadeSlider.value();
     timeCtrl.dissolveDuration = fadeDurationMs;
   });
+
+  // clear button, to the right of the slider, hidden until the sandbox
+  clearBtn = createButton("");
+  clearBtn.id('clearBtn');
+  clearBtn.position(340, height - 107);
+  clearBtn.hide();
+  clearBtn.mousePressed((e) => {
+    e.stopPropagation(); // this click should not also start a stroke
+    ctrl.clear();
+    particleCtrl.clear();
+    timeCtrl.clear();
+  });
+  buildUIStyles();
 }
 
 // --------------------------------------------------------
@@ -192,6 +209,7 @@ function draw() {
     drawDoor();
     updateEnterTimeline();
     fadeSlider.hide();
+    clearBtn.hide();
     return;
   }
 
@@ -204,6 +222,7 @@ function draw() {
     drawToolIcons();
     updateEnterTimeline();
     fadeSlider.hide();
+    clearBtn.hide();
     return;
   }
 
@@ -214,24 +233,29 @@ function draw() {
     drawGlassBack();
     // interactive particles run continuously (gravity, drift, disturbance)
     particleCtrl.update();
+    attractorCtrl.renderTrace();
     particleCtrl.render();
     // dissolve batches run in the background; finished batches add particles
     const newParticles = timeCtrl.update();
     if (newParticles.length > 0) particleCtrl.addParticles(newParticles);
     timeCtrl.render();
-    // current strokes and the HUD draw on top
     ctrl.render();
     drawGlassFront();
     drawToolIcons();
 
     // fade duration slider and text
     fadeSlider.show();
+    clearBtn.show();
     fill(255);
     noStroke();
     textAlign(LEFT, BOTTOM);
-    textSize(14);
-    text(`Fade Duration: ${fadeDurationMs} ms`, 20, height - 55);
+    // Caveat for this label only, then restore Calibri for every other text
+    textFont("Caveat");
+    textSize(20);
+    // [OUT OF SCOPE] backticks let the number sit inside the sentence
+    text(`Fade Duration: ${fadeDurationMs} ms`, 20, height - 85);
     textAlign(LEFT, BASELINE);
+    textFont("Calibri");
 
     // each line dissolves 3 seconds after it was released, on its own clock
     const due = [];
@@ -253,12 +277,11 @@ function draw() {
 // Submodule: Background glow effect.
 // --------------------------------------------------------
 
-// moves the glows, draws them into the small layer and blurs it there:
-// blurring a quarter-size layer every frame is much cheaper than
-// blurring the full canvas
+// draw the glows into the small layer and blur there.
+// a quarter-size blur is much cheaper than blurring the whole screen.
 function drawGlows() {
   const s = 4; // downscale factor
-  glowLayer.clear(); // [OUT OF SCOPE] clear() empties the off-screen layer
+  glowLayer.clear(); // [OUT OF SCOPE] clear() empties the small canvas
   for (let i = 0; i < glows.length; i++) {
     const g = glows[i];
     g.x += g.vx;
@@ -269,16 +292,15 @@ function drawGlows() {
     glowLayer.fill(g.hue, 50, 25, 6); // very low opacity colour
     glowLayer.circle(g.x / s, g.y / s, (g.r * 2) / s);
   }
-  // [OUT OF SCOPE] filter(BLUR) blurs the small layer.
-  glowLayer.filter(BLUR, 20); // cheap: only 1/16 of the full pixels
+  // [OUT OF SCOPE] filter(BLUR) on the small layer, not the whole screen
+  glowLayer.filter(BLUR, 20); // cheap: only 1/16 of the pixels
 }
 
 // ---------------------------------------------------------
 // Submodule: Entry timeline & iris mask transition.
 // ---------------------------------------------------------
 
-// drives the entry timeline: door close, black fade in/out, slide and
-// landing sounds, and finally flips the scene to the interactive sandbox
+// door close, black cover, slide and land sounds, then the sandbox
 function updateEnterTimeline() {
   if (!enterStarted) return; // timeline only runs after the door click
   const t = millis() - enterT0;
@@ -323,6 +345,7 @@ function updateEnterTimeline() {
           scene = "sandbox";
           // build the particle mask once before the sandbox starts
           particleCtrl.prepare();
+          attractorCtrl.setup();
         }
       }
     }
@@ -330,8 +353,7 @@ function updateEnterTimeline() {
   drawIris(visR);
 }
 
-// paints black everywhere outside a circular opening of radius visR:
-// a huge black stroked circle, its inner edge forms the round mask
+// black everywhere except a round hole. a fat stroked circle makes the hole.
 function drawIris(visR) {
   if (visR >= maxIrisR) return; // fully visible, nothing to cover
   push();
@@ -346,13 +368,10 @@ function drawIris(visR) {
 // Submodule: Glass sliding animation.
 // ---------------------------------------------------------
 
-// slides the glass in from the right with easing:
-// each frame it moves part of the remaining distance, so it is fast
-// at first and slows down as it reaches its final position
+// slide in from the right. each frame we only cover part of the gap, so it slows down at the end.
 function updateGlassSlide() {
-  // [OUT OF SCOPE] lerp(a, b, t) moves a value toward b by fraction t each
-  // frame (linear interpolation).
-  // hold the glass off-screen while the cover is still blacking in
+  // [OUT OF SCOPE] lerp eases it part of the way toward the target each frame
+  // hold it off-screen while the cover is still going black
   if (scene === "intro" && !slideAnimStarted) return;
   // phase 1: slide in from the right while keeping the tilt
   if (glassOffsetX > 0.5) {
@@ -368,7 +387,7 @@ function updateGlassSlide() {
   }
 }
 
-// returns the position and size where the glass is drawn on the canvas
+// where the glass sits on the canvas
 function getGlassRect() {
   const scale = 1.0;
   const h = height * scale;
@@ -378,13 +397,11 @@ function getGlassRect() {
   return { x, y, w, h };
 }
 
-// draws the back layer of the glass: the rear rim arc only
-// sits under the strokes, so strokes can cover it
+// back of the cup, under the strokes so we can draw over it
 function drawGlassBack() {
   const r = getGlassRect();
-  // [OUT OF SCOPE] push/pop save and restore drawing style; translate moves the
-  // origin and rotate turns the canvas.
-  // pivot at 11% width / 92.6% height of the glass (the marked point)
+  // [OUT OF SCOPE] push/pop so the move and rotate don't stick for the rest of the draw
+  // pivot is the marked point, 11% across and 92.6% down the glass
   push();
   translate(r.x + glassOffsetX + r.w * 0.11, r.y + r.h * 0.926);
   rotate(glassAngle);
@@ -392,8 +409,7 @@ function drawGlassBack() {
   pop();
 }
 
-// draws the front layer of the glass: the full cup line art
-// sits over the strokes, so it covers strokes drawn inside the cup
+// front line art, over the strokes so it covers what's inside the cup
 function drawGlassFront() {
   const r = getGlassRect();
   // pivot at 11% width / 92.6% height of the glass (the marked point)
@@ -408,15 +424,15 @@ function drawGlassFront() {
 // Submodule: Glass collision detection (prevent drawing inside glass).
 // ---------------------------------------------------------
 
-// glass-wall check given image coordinates
+// is this image pixel on the glass wall?
 function glassCollisionMap(mx, my) {
   if (!glassCollisionImg) return false;
   if (mx < 0 || my < 0 || mx >= glassCollisionImg.width || my >= glassCollisionImg.height) return false;
-  // read from the cached pixel array instead of per-frame get()
+  // use the pixels we cached, get() every frame is too slow
   return glassCollisionImg.pixels[(my * glassCollisionImg.width + mx) * 4 + 3] > 8;
 }
 
-// maps a canvas point onto the collision image; true = the point hits the glass
+// canvas point to collision image. true means we hit the glass.
 function glassCollision(cx, cy) {
   if (!glassCollisionImg) return false; // safety fallback: no image, no collision
   if (glassOffsetX > 0.5 || abs(glassAngle) > 0.01) return false; // wait until the glass stops
@@ -427,34 +443,6 @@ function glassCollision(cx, cy) {
   const mx = floor((cx - x) / r.w * glassCollisionImg.width);
   const my = floor((cy - y) / r.h * glassCollisionImg.height);
   return glassCollisionMap(mx, my);
-}
-
-// scans the canvas segment (x0,y0)-(x1,y1) inside the collision image at
-// 1px steps of the image domain. the image is much higher resolution than
-// the canvas, so thin glass lines there are several pixels wide and can
-// never be jumped over. returns the first hit fraction, or -1 if clear.
-function firstGlassHit(x0, y0, x1, y1) {
-  if (!glassCollisionImg) return -1;
-  const r = getGlassRect();
-  const ox = r.x + glassOffsetX;
-  const oy = r.y;
-  const W = glassCollisionImg.width, H = glassCollisionImg.height;
-  const mx0 = (x0 - ox) / r.w * W;
-  const my0 = (y0 - oy) / r.h * H;
-  const dxm = (x1 - x0) / r.w * W;
-  const dym = (y1 - y0) / r.h * H;
-  // start position already inside the glass: cannot move at all
-  const sx = floor(mx0), sy = floor(my0);
-  if (sx >= 0 && sx < W && sy >= 0 && sy < H && glassCollisionMap(sx, sy)) return 0;
-  const steps = Math.max(1, Math.ceil(Math.max(abs(dxm), abs(dym))));
-  for (let st = 1; st <= steps; st++) {
-    const f = st / steps;
-    const mx = floor(mx0 + dxm * f);
-    const my = floor(my0 + dym * f);
-    if (mx < 0 || my < 0 || mx >= W || my >= H) continue;
-    if (glassCollisionMap(mx, my)) return (st - 1) / steps; // stop just before the line
-  }
-  return -1;
 }
 
 // the opening "door" screen: hovering the mouse opens the two panels
@@ -481,8 +469,7 @@ function drawDoor() {
   // dim the background behind the closed door; while it is open the
   // doorway shows the real sketch background directly
   noStroke();
-  // [OUT OF SCOPE] condition ? a : b is the ternary operator, a short if/else
-  // that returns a value (a when true, b when false).
+  // [OUT OF SCOPE] ? : is a one-line if/else. We didn't use this form in class.
   fill(0, 0, 4, hovering ? 0 : 70);
   rect(0, 0, width, height);
   // hard switch: hovering shows the open door, otherwise the closed door
@@ -507,7 +494,7 @@ function drawDoor() {
   // prompt below the door
   noStroke();
   fill(0, 0, 100);
-  // [OUT OF SCOPE] textAlign/textSize/text draw the prompt.
+  // [OUT OF SCOPE] textAlign / textSize / text for the words under the door
   textAlign(CENTER, CENTER);
   textSize(30);
   text("CLICK TO ENTER", width / 2, dy + dh + 70);
@@ -518,29 +505,78 @@ function drawDoor() {
 // Submodule: Toolbar render.
 // ---------------------------------------------------------
 
-// draws the three tool icons: the active tool uses its highlighted image
+// tool icons. the selected one uses the lit image.
 function drawToolIcons() {
   for (let i = 0; i < toolIcons.length; i++) {
     const ic = toolIcons[i];
+    // [OUT OF SCOPE] ? : picks the lit icon when this tool is selected
     const img = ic.tool === ctrl.tool ? ic.activeImg : ic.img;
     image(img, ic.x, ic.y, ic.size, ic.size);
   }
+}
+
+// doodle images for the clear button and the fade slider
+function buildUIStyles() {
+  // [OUT OF SCOPE] appearance: none turns off the browser's own slider
+  // [OUT OF SCOPE] ::-webkit-slider-thumb and ::-moz-range-thumb are the knob in Chrome and Firefox
+  // bright image normally, line drawing while it's held down
+  const uiStyle = createElement('style');
+  uiStyle.html(
+    "#clearBtn {" +
+    "width: 180px; height: 90px; padding: 0; border: none;" +
+    "background-color: transparent;" +
+    "background-image: url('assets/btn-clear-down.png');" +
+    "background-size: 100% 100%; background-repeat: no-repeat;" +
+    "cursor: pointer; color: transparent; font-size: 0;" +
+    "}" +
+    "#clearBtn:active {" +
+    "background-image: url('assets/btn-clear-up.png');" +
+    "}" +
+    "#fadeSlider {" +
+    "appearance: none; -webkit-appearance: none;" +
+    "width: 300px; height: 36px; outline: none;" +
+    "background-color: transparent;" +
+    "background-image: url('assets/slider-track.png');" +
+    "background-size: 100% 100%; background-repeat: no-repeat;" +
+    "}" +
+    "#fadeSlider::-webkit-slider-thumb {" +
+    "appearance: none; -webkit-appearance: none;" +
+    "width: 48px; height: 48px; border: none;" +
+    "background-color: transparent;" +
+    "background-image: url('assets/slider-thumb-down.png');" +
+    "background-size: 100% 100%; background-repeat: no-repeat;" +
+    "cursor: pointer;" +
+    "}" +
+    "#fadeSlider::-moz-range-thumb {" +
+    "appearance: none; -webkit-appearance: none;" +
+    "width: 48px; height: 48px; border: none;" +
+    "background-color: transparent;" +
+    "background-image: url('assets/slider-thumb-down.png');" +
+    "background-size: 100% 100%; background-repeat: no-repeat;" +
+    "cursor: pointer;" +
+    "}" +
+    "#fadeSlider::-moz-range-track {" +
+    "background-color: transparent;" +
+    "background-image: url('assets/slider-track.png');" +
+    "background-size: 100% 100%; background-repeat: no-repeat;" +
+    "height: 36px; border: none;" +
+    "}"
+  );
 }
 
 // ---------------------------------------------------------
 // Input handler: mouse & keyboard, send actions to controllers.
 // ---------------------------------------------------------
 
-function mousePressed() {
+function mousePressed(event) {
   // clicking the door unlocks the audio and opens the sketch
   if (scene === "door") {
     const r = getDoorRect();
     const onDoor =
       mouseX >= r.x && mouseX <= r.x + r.w &&
       mouseY >= r.y && mouseY <= r.y + r.h;
-    if (!onDoor) return; // clicking outside the door does nothing
-    // [OUT OF SCOPE] userStartAudio() unlocks sound inside a user gesture,
-    // because browsers block audio before the first click.
+    if (!onDoor) return; // a click off the door does nothing
+    // [OUT OF SCOPE] userStartAudio() has to run inside the click, or the browser stays silent
     userStartAudio();
     audioStarted = true;
     // start the entry timeline: open sound, close sound, iris opens
@@ -553,13 +589,19 @@ function mousePressed() {
     doorOpenSound.play();
     return;
   }
-  // first click unlocks the browser audio
+  // if they didn't come through the door, this click still has to unlock the sound
   if (!audioStarted) {
+    // [OUT OF SCOPE] same unlock, just on whatever they click first
     userStartAudio();
     audioStarted = true;
   }
   // sandbox: toolbar, drawing, erasing and particle grabbing
   if (scene === "sandbox") {
+    // a drag that starts on the slider or button must not draw on the canvas
+    if (event.target.tagName !== 'CANVAS') {
+      pointerOnUI = true;
+      return;
+    }
     // clicking a toolbar icon switches the tool
     for (let i = 0; i < toolIcons.length; i++) {
       const ic = toolIcons[i];
@@ -578,6 +620,7 @@ function mousePressed() {
 
 function mouseDragged() {
   if (scene === "sandbox") {
+    if (pointerOnUI) return;
     if (mouseButton === RIGHT) { ctrl.eraseDrag(mouseX, mouseY); return; }
     if (ctrl.tool === "hand") particleCtrl.grabDrag(mouseX, mouseY);
     else ctrl.addPoint(mouseX, mouseY);
@@ -585,18 +628,17 @@ function mouseDragged() {
   }
 }
 
-// [OUT OF SCOPE] mouseReleased fires when the button is let go; it pairs with
-// mousePressed.
+// [OUT OF SCOPE] mouseReleased is the button coming up, pairs with mousePressed
 function mouseReleased() {
   if (scene === "sandbox") {
+    if (pointerOnUI) { pointerOnUI = false; return; }
     if (ctrl.tool === "hand") particleCtrl.grabRelease();
     else ctrl.endStroke();
     return;
   }
 }
 
-// [OUT OF SCOPE] mouseWheel fires on scroll; e.delta is the scroll amount,
-// used here to cycle the colour.
+// [OUT OF SCOPE] mouseWheel is the scroll. e.delta is how far it moved.
 function mouseWheel(e) {
   if (scene === "sandbox") ctrl.cycleColour(e.delta);
   return false;
@@ -607,16 +649,13 @@ function keyPressed() {
   if (scene === "door") return;
   // scenes where drawing is active
   const canDraw = scene === "sandbox";
-  // Ctrl+Z (Cmd+Z on Mac) undoes the current or last stroke
-  // [OUT OF SCOPE] keyCode is the key number (90 = Z) and keyIsDown checks a
-  // modifier key; this implements Ctrl+Z / Cmd+Z to undo.
+  // ctrl+z (cmd+z on mac) undoes the line
+  // [OUT OF SCOPE] keyCode 90 is Z. keyIsDown checks Ctrl or Cmd.
   if (canDraw && keyCode === 90 &&
       (keyIsDown(CONTROL) || keyIsDown(COMMAND))) {
     ctrl.undo();
     return;
   }
-  // Enter or Space no longer triggers the dissolve: it now starts
-  // automatically after 3 seconds of no activity
   if (canDraw && key === "1") ctrl.adjustSize(-1);
   else if (canDraw && key === "2") ctrl.adjustSize(1);
 }
@@ -630,5 +669,7 @@ function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   glowLayer.resizeCanvas(width / 4, height / 4);
   maxIrisR = Math.sqrt((width / 2) * (width / 2) + (height / 2) * (height / 2));
-  fadeSlider.position(20, height - 50);
+  fadeSlider.position(20, height - 80);
+  clearBtn.position(340, height - 107);
+  attractorCtrl.setup();
 }

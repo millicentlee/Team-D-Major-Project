@@ -1,37 +1,36 @@
 // user-input-mechanic.js
-// DrawController stores every stroke as an array of points.
-// It owns all the drawing logic for the user input mechanic.
+// strokes, tools, erase. Yufei's dissolve reads the strokes from here.
 
 class DrawController {
   constructor() {
-    this.strokes = [];       // array of finished strokes
-    this.current = null;     // stroke being drawn right now
-    this.tool = "pencil";    // current tool: pencil, pen or marker
-    this.hue = 180;          // current colour (HSB hue)
-    this.lastErase = null;   // last erase position, used to erase continuously
+    this.strokes = [];       // finished lines
+    this.current = null;     // the one we're still drawing
+    this.tool = "pencil";    // pencil, pen, marker or hand
+    this.hue = 180;
+    this.lastErase = null;   // so a right-drag can keep going
   }
 
-  // called when the left mouse button is pressed
+  // left click
   startStroke(x, y) {
-    if (glassCollision(x, y)) return; // strokes cannot start on the glass
+    if (glassCollision(x, y)) return; // not on the glass
     if (tapSound) tapSound.play();
-    // size is stored once here so later size changes never affect this stroke
+    // lock the size now, so changing the brush later doesn't change this line
     this.current = { pts: [{ x, y }], tool: this.tool, hue: this.hue, size: BRUSH[this.tool].size };
   }
 
-  // called while the mouse is dragged
-  // adds interpolated points so lines stay continuous
+  // while dragging, fill in points so the line doesn't break
   addPoint(x, y) {
     if (!this.current) return;
-    if (glassCollision(x, y)) return; // strokes cannot pass through the glass
+    if (glassCollision(x, y)) return; // can't cross the glass
     const pts = this.current.pts;
     const last = pts[pts.length - 1];
+    // [OUT OF SCOPE] Math.ceil — we didn't cover the Math object in class
     const n = Math.ceil(dist(last.x, last.y, x, y) / 2);
     const j = BRUSH[this.tool].jitter; // jitter makes pencil strokes look rough
     for (let i = 1; i <= n; i++) {
       let px = last.x + (x - last.x) * i / n;
       let py = last.y + (y - last.y) * i / n;
-      // every interpolated point is checked: the stroke stops at the glass
+      // stop at the glass
       if (glassCollision(px, py)) break;
       if (j > 0) {
         px += random(-j, j);
@@ -41,17 +40,17 @@ class DrawController {
     }
   }
 
-  // called when the mouse is released: save the current stroke
+  // mouse up, keep the line
   endStroke() {
     if (this.current) {
-      // this line's own release time; later strokes do not change it
+      // this line's own time, later lines don't change it
       this.current.finishedAt = millis();
       this.strokes.push(this.current);
       this.current = null;
     }
   }
 
-  // Ctrl+Z: cancel a stroke in progress, otherwise drop the last finished stroke
+  // ctrl+z drops the line in progress, or the last finished one
   undo() {
     if (this.current) {
       this.current = null;
@@ -62,7 +61,13 @@ class DrawController {
     }
   }
 
-  // switches tool by name ("pencil", "pen" or "marker"), used by the toolbar icons
+  // wipe every line, including the one still being drawn
+  clear() {
+    this.strokes = [];
+    this.current = null;
+  }
+
+  // toolbar picks pencil, pen, marker or hand
   switchTool(k) {
     if (clickSound) clickSound.play();
     switch (k) {
@@ -73,28 +78,26 @@ class DrawController {
     }
   }
 
-  // key 1 and key 2 make the current brush thinner and thicker
+  // 1 and 2 change the brush size
   adjustSize(delta) {
     const b = BRUSH[this.tool];
-    b.size = constrain(b.size + delta, 2, 30);
+    b.size = constrain(b.size + delta, 6, 30);
   }
 
-  // scroll wheel cycles the hue
-  // only the hue changes, so the colour moves smoothly around the rainbow
+  // scroll walks the hue around the wheel. saturation and brightness stay put.
   cycleColour(delta) {
     this.hue = (this.hue + delta * 0.1 + 360) % 360;
   }
 
-  // right click removes every point close to (x, y)
+  // right click erases around the cursor
   eraseClick(x, y) {
     this.eraseRadius(x, y);
     this.lastErase = { x, y };
   }
 
-  // right drag removes points continuously along the path
+  // right drag erases along the path
   eraseDrag(x, y) {
-    // [OUT OF SCOPE] condition ? a : b is the ternary operator, a short if/else
-    // that returns a value (a when true, b when false).
+    // [OUT OF SCOPE] ? : is a one-line if/else. We didn't use this form in class.
     const sx = this.lastErase ? this.lastErase.x : x;
     const sy = this.lastErase ? this.lastErase.y : y;
     const n = Math.max(1, Math.ceil(dist(sx, sy, x, y) / 5));
@@ -104,11 +107,11 @@ class DrawController {
     this.lastErase = { x, y };
   }
 
-  // removes points whose distance from (x, y) is smaller than the radius
+  // drop points inside the erase circle
   eraseRadius(x, y) {
     for (let i = 0; i < this.strokes.length; i++) {
       const s = this.strokes[i];
-      // keep only points farther than the erase radius
+      // keep points outside the circle
       const kept = [];
       for (let i = 0; i < s.pts.length; i++) {
         const p = s.pts[i];
@@ -116,7 +119,7 @@ class DrawController {
       }
       s.pts = kept;
     }
-    // drop strokes that no longer have any points
+    // throw out lines that have no points left
     const keptStrokes = [];
     for (let i = 0; i < this.strokes.length; i++) {
       const s = this.strokes[i];
@@ -125,8 +128,7 @@ class DrawController {
     this.strokes = keptStrokes;
   }
 
-  // output for Yufei's mechanic: strokes kept grouped so the lines can be
-  // redrawn while they fade out
+  // for Yufei: keep each stroke together so the fade can redraw the line
   exportStrokes(list) {
     const src = list || this.strokes;
     const result = [];
@@ -142,7 +144,7 @@ class DrawController {
     return result;
   }
 
-  // draw everything, called from sketch.js every frame
+  // finished lines, the one in progress, and the cursor dot
   render() {
     for (let i = 0; i < this.strokes.length; i++) {
       const s = this.strokes[i];
@@ -150,18 +152,16 @@ class DrawController {
     }
     if (this.current) this.drawStroke(this.current, 0.6);
     this.drawHover();
-    this.drawUI();
   }
 
-  // draws one stroke: lines between points plus dots on every point
+  // the line, plus a dot on each point
   drawStroke(s, fade) {
     const b = BRUSH[s.tool];
-    // keep the size from when the stroke was drawn
+    // use the size from when we drew it
     let size;
     if (s.size !== undefined) size = s.size;
     else size = b.size;
-    // [OUT OF SCOPE] push/pop save and restore style; strokeJoin/strokeCap set
-    // the corners and line ends.
+    // [OUT OF SCOPE] push/pop so this stroke's style doesn't leak into the next draw
     push();
     stroke(s.hue, 80, 90, fade * 100 * b.alpha);
     strokeWeight(size);
@@ -180,7 +180,7 @@ class DrawController {
     for (let i = 0; i < s.pts.length; i++) {
       const p = s.pts[i];
       if (b.cap === "square") {
-        // [OUT OF SCOPE] rectMode(CENTER) draws rects from their centre.
+        // [OUT OF SCOPE] rectMode(CENTER) puts the square on the point instead of its corner
         rectMode(CENTER);
         rect(p.x, p.y, size, size);
       } else {
@@ -190,56 +190,34 @@ class DrawController {
     pop();
   }
 
-  // small preview near the cursor: current colour, or erase range
+  // cursor dot at the brush size, or the erase circle
   drawHover() {
     push();
-    if (this.tool === "hand") { pop(); return; } // hand tool has no colour preview
+    if (this.tool === "hand") { pop(); return; } // hand doesn't paint
     if (mouseIsPressed && mouseButton === RIGHT) {
       noFill();
       stroke(0, 0, 100, 70);
       circle(mouseX, mouseY, 80);
       pop();
-      return; // erase range
+      return; // erase circle
     }
-    // do not draw the colour preview over the left toolbar,
-    // otherwise it looks like another icon is being selected
+    // don't draw it over the toolbar or it looks like another icon
     if (mouseX < 130 && mouseY > 100 && mouseY < 890) {
       pop();
       return;
     }
-    const hx = constrain(mouseX + 20, 30, width - 30);
-    const hy = constrain(mouseY - 20, 30, height - 30);
+    // current colour, same size as the brush
     fill(this.hue, 80, 90);
-    noStroke();
-    circle(hx, hy, 18);
-    stroke(0, 0, 100);
-    strokeWeight(2);
-    noFill();
-    circle(hx, hy, 18);
-    pop();
-  }
-
-  // HUD: current colour, tool name and hue value
-  drawUI() {
-    push();
-    fill(this.hue, 80, 90);
-    noStroke();
-    circle(40, 40, 40);
-    fill(0, 0, 100);
-    noStroke();
-    // [OUT OF SCOPE] textSize/text draw the HUD.
-    textSize(16);
-    text("Tool: " + this.tool, 70, 30);
-    text("Hue: " + Math.round(this.hue), 70, 52);
-    if (this.tool === "hand") text("Size: -", 70, 74);
-    else text("Size: " + BRUSH[this.tool].size, 70, 74);
+    stroke(0, 0, 100, 70);
+    strokeWeight(1);
+    circle(mouseX, mouseY, BRUSH[this.tool].size);
     pop();
   }
 }
 
-// brush settings: size, opacity and cap shape for each tool
+// brush size, opacity and cap
 const BRUSH = {
-  pencil: { size: 3,  alpha: 0.90, cap: "round",  jitter: 1.5 },
+  pencil: { size: 6,  alpha: 0.90, cap: "round",  jitter: 1.5 },
   pen:    { size: 7,  alpha: 0.75, cap: "round",  jitter: 0.5 },
   marker: { size: 16, alpha: 0.30, cap: "square", jitter: 0   },
   hand:   { size: 0,  alpha: 1,    cap: "round",  jitter: 0   } // placeholder, hand draws nothing
